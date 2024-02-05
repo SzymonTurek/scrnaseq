@@ -1,0 +1,401 @@
+---
+title: "sc_main"
+output: html_document
+date: "2023-07-13"
+---
+
+
+```{r, include=FALSE}
+library(Seurat)
+library(tidyverse)
+library(ggpubr)
+library(Matrix)
+
+
+```
+
+
+```{r, include=FALSE, echo=FALSE}
+sc_data_dir <- "/Users/szymonturek/Documents/single_cell_rna_seq_workshop-main/Module #1 - R & RNASeq Review/filtered_gene_bc_matrices/hg19"
+
+
+```
+
+```{r, warning=FALSE, include=FALSE}
+investigate_data <- function(sc_data){
+  dir.create(file.path(getwd(), "investigate_data"))
+  dir.create(file.path(getwd(), "seurat_output"))
+  sc_data_raw <- CreateSeuratObject(sc_data)
+  sc_data_raw$percent.mt <- PercentageFeatureSet(sc_data_raw, pattern = "^MT-")
+  print_sc_data_statistics(sc_data_raw)
+  print_scdata_histograms(sc_data_raw)
+  print_violin_plots(sc_data_raw)
+  make_scatter_plots(sc_data_raw)
+}
+```
+
+```{r, include=FALSE}
+build_seurat_object <- function(sc_data, nFeature_filter, nFeature_filter_lower, mt_filter){
+  
+  sc_data_raw <- CreateSeuratObject(sc_data)
+  sc_data_raw$percent.mt <- PercentageFeatureSet(sc_data_raw, pattern = "^MT-")
+  sc_data <- sc_data_raw%>%
+    PercentageFeatureSet(pattern = "^MT-", col.name = "percent.mt") %>%
+    subset(subset = nFeature_RNA > nFeature_filter & nFeature_RNA < nFeature_filter_lower & percent.mt < mt_filter) %>%
+    NormalizeData() %>%
+    FindVariableFeatures() %>%
+    ScaleData() 
+    
+  return(sc_data)
+}
+
+
+```
+
+
+
+
+
+```{r, include=FALSE}
+print_sc_data_statistics <- function(sc_data){
+  print(paste("Median of the number of different genes that had any reads:", median(sc_data@meta.data$nFeature_RNA)))
+  print(paste("Median of the number of UMI counts in a cell:", median(sc_data@meta.data$nCount_RNA)))
+
+}
+```
+
+
+
+```{r, include=FALSE}
+print_scdata_histograms <- function(sc_data) {
+  pdf(file.path(getwd(), "investigate_data", "nCount_histogram.pdf")) 
+  hist(sc_data$nCount_RNA)
+  dev.off ()
+  
+  pdf(file.path(getwd(), "investigate_data", "nFeature_histogram.pdf")) 
+  hist(sc_data$nFeature_RNA)
+  dev.off ()
+  
+  pdf(file.path(getwd(), "investigate_data", "mt.percent_histogram.pdf")) 
+  hist(sc_data$percent.mt)
+  dev.off ()
+  
+  hist(sc_data$nCount_RNA)
+  hist(sc_data$nFeature_RNA)
+  hist(sc_data$percent.mt)
+
+}
+
+```
+
+```{r, include=FALSE}
+print_violin_plots <- function(sc_data) {
+  plt <- VlnPlot(sc_data, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+               ncol = 3) 
+  print(plt)
+  #ggsave(filename = "QC.png", plot = plt, width = 7, height = 3.5)
+  pdf(file.path(getwd(), "investigate_data", "vln_plot.pdf")) 
+  print(plt)
+  dev.off ()
+}
+```
+
+```{r, include=FALSE}
+make_scatter_plots <- function(sc_data){
+  plot1 <- FeatureScatter(sc_data, feature1 = "nCount_RNA", feature2 = "percent.mt")
+  print(plot1)
+ 
+  pdf(file.path(getwd(), "investigate_data", "nCount-percent_mt_scatter.pdf")) 
+  print(plot1)
+  dev.off ()
+  
+  plot2 <- FeatureScatter(sc_data, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+  print(plot2)
+
+  pdf(file.path(getwd(), "investigate_data", "nCount-nFeature_scatter.pdf")) 
+  print(plot2)
+  dev.off ()
+
+}
+```
+
+
+```{r, include=FALSE}
+print_variable_features <- function(sc_data, most_highly_variable_genes_number) {
+  # Identify the nr most highly variable genes
+  top__variable_genes <- head(VariableFeatures(sc_data), most_highly_variable_genes_number)
+  plot1 <- VariableFeaturePlot(sc_data)
+  plot1 <- LabelPoints(plot = plot1, points = top__variable_genes, repel = TRUE)
+  print(plot1)
+  
+  pdf(file.path(getwd(), "seurat_output", paste0(most_highly_variable_genes_number,"_most_highly_variable_genes.pdf")))
+  print(plot1)
+  dev.off ()
+ 
+}
+
+```
+
+
+```{r, include=FALSE}
+create_PCA_plots <- function(sc_data){
+  dir.create(file.path(getwd(), "PCA_output"))
+ # Pull Info for 20 features, balanced positive/negative, for PC1
+  topfeatures <- TopFeatures(object = sc_data[["pca"]], dim = 1, nfeatures = 20, balanced = TRUE)
+  print(topfeatures)
+
+  # Pull info for 20 features, balanced positive/negative, for all PCs in given object
+  feature_list <- list()
+
+  for (i in 1:length(x = sc_data@reductions$pca)) {
+    feature_list[[i]] <- TopFeatures(object = sc_data[["pca"]], dim = i, nfeatures = 20, balanced = T)
+  }
+  print(feature_list)
+  
+  
+  dim_plot <- DimPlot(sc_data, reduction = "pca")
+  print(dim_plot)
+  
+  pdf(file.path(getwd(), "PCA_output", paste0("dim_plot.pdf")))
+  print(dim_plot)
+  dev.off ()
+  
+  
+  
+  # What are the genes that determine PC1 and PC2?
+  dim_loadings <- VizDimLoadings(sc_data, dims = 1:2, reduction = "pca")
+  print(dim_loadings)
+  
+  pdf(file.path(getwd(), "PCA_output", paste0("PC1-2.pdf")))
+  print(dim_loadings)
+  dev.off ()
+  
+  
+  dim_loadings <- VizDimLoadings(sc_data, dims = 2:3, reduction = "pca")
+  print(dim_loadings)
+  
+  pdf(file.path(getwd(), "PCA_output", paste0("PC2-3.pdf")))
+  print(dim_loadings)
+  dev.off ()
+  
+  
+  dim_loadings <- VizDimLoadings(sc_data, dims = 3:4, reduction = "pca")
+  print(dim_loadings)
+  
+  pdf(file.path(getwd(), "PCA_output", paste0("PC3-4.pdf")))
+  print(dim_loadings)
+  dev.off ()
+  
+  
+
+  dim_loadings <- VizDimLoadings(sc_data, dims = 4:5, reduction = "pca")
+  print(dim_loadings)
+  
+  pdf(file.path(getwd(), "PCA_output", paste0("PC4-5.pdf")))
+  print(dim_loadings)
+  dev.off ()
+  
+  # Choose the number of principle components to keep
+  elbow_plot <- ElbowPlot(sc_data)
+  print(elbow_plot)
+  
+  pdf(file.path(getwd(), "PCA_output", paste0("elbow_plot.pdf")))
+  print(elbow_plot)
+  dev.off ()
+  
+  return(feature_list)
+}
+
+```
+
+
+```{r, include=FALSE}
+create_feature_plots <- function(sc_data) {
+  dir.create(file.path(getwd(), "feature_plots"))
+  PC_list <- c('PC_1', 'PC_2', 'PC_3', 'PC_4', 'PC_5')
+  
+  for (i in 1:length(PC_list)){
+    feature_plot <- FeaturePlot(object = sc_data, features = PC_list[i])
+    print(feature_plot)
+    
+    pdf(file.path(getwd(), "feature_plots", paste0(PC_list[i], "_feature_plot.pdf")))
+    print(feature_plot)
+    dev.off ()
+    
+    
+    feature_plot <-FeaturePlot(object = sc_data, features = feature_list[[i]]$positive)
+    print(feature_plot)
+    
+    pdf(file.path(getwd(), "feature_plots", paste0(PC_list[i], "_feature_plot-POSITIVE.pdf")))
+    print(feature_plot)
+    dev.off ()
+    
+    feature_plot <-FeaturePlot(object = sc_data, features = feature_list[[i]]$negative)
+    print(feature_plot)
+    
+    pdf(file.path(getwd(), "feature_plots", paste0(PC_list[i], "_feature_plot-NEGATIVE.pdf")))
+    print(feature_plot)
+    dev.off ()
+  }
+}
+
+```
+
+```{r}
+find_nearest_neighbors <- function(sc_data) {
+  sc_data <- FindNeighbors(sc_data, dims = 1:10) #Find nearest neighbors and construct the graph 
+  sc_data <- FindClusters(sc_data, resolution = 0.5) #Find the clusters
+  sc_data <- RunUMAP(sc_data, dims = 1:10) #Get the UMAP embedding
+  dim_plot <- DimPlot(sc_data, reduction = "umap") #Plot the UMAP with clustering
+  print(dim_plot)
+  
+  pdf(file.path(getwd(), "seurat_output", paste0("UMAP_plot.pdf")))
+  print(dim_plot)
+  dev.off ()
+  
+  sc_data <- RunTSNE(sc_data, dims = 1:10)
+  dim_plot <- DimPlot(sc_data, reduction = "tsne")
+  print(dim_plot)
+  
+  pdf(file.path(getwd(), "seurat_output", paste0("tsne_plot.pdf")))
+  print(dim_plot)
+  dev.off ()
+  
+  return(sc_data)
+}
+```
+  
+
+```{r}
+find_markers_for_cluster  <- function(sc_data, cluster_number) {
+  
+  cluster.markers <- FindMarkers(sc_data, ident.1 = cluster_number,
+                                logfc.threshold = .5,
+                                min.pct = 0.25)
+
+  cluster.markers %>%
+  top_n(5, -log10(p_val))
+}
+  
+
+```
+
+
+
+```{r}
+find_markers_that_distinguish_clusters <- function(sc_data, cluster_1, cluster_2){
+  cluster.dist.markers <- FindMarkers(sc_data, ident.1 = cluster_1,
+                                     ident.2 = cluster_2,
+                                     logfc.threshold = .5,
+                                     min.pct = 0.25)
+  cluster.dist.markers %>%
+    top_n(5, -log10(p_val))
+
+}
+
+```
+  
+  
+```{r}
+find_all_markers <- function(sc_data) {
+  sc_data.markers <- FindAllMarkers(sc_data,
+                               only.pos = TRUE, 
+                               min.pct = 0.25, 
+                               logfc.threshold = 0.5)
+  marker_summary <- sc_data.markers %>% 
+    group_by(cluster) %>%
+    top_n(n = 6, wt = avg_log2FC)
+  print(marker_summary)
+  
+  return(sc_data.markers)
+}
+```
+
+  
+```{r, include=FALSE}
+run_main <- function(){
+  pbmc.data <- Read10X(data.dir = sc_data_dir)
+  
+  investigate_data(pbmc.data)
+
+  sc_data <- build_seurat_object(pbmc.data, 200, 2500, 5)  #Now set the filter tresholds
+  print_sc_data_statistics(sc_data)
+  print_variable_features(sc_data, 10)# Identify the 10 most highly variable genes
+  print_variable_features(sc_data, 20)# Identify the 20 most highly variable genes
+  sc_data <- RunPCA(sc_data)
+  feature_list <- create_PCA_plots(sc_data)
+  create_feature_plots(sc_data)
+  sc_data <- find_nearest_neighbors(sc_data)
+ 
+  find_markers_for_cluster(sc_data, 3) #Find markers for cluster 3
+  find_markers_for_cluster(sc_data, c(0, 2, 4, 6)) #Find markers of 0, 2, 4, and 6
+  find_markers_that_distinguish_clusters(sc_data, 6, c(0, 2, 4)) 
+  sc_data.markers <- find_all_markers(sc_data)#Find all markers for all clusters
+
+  #http://xteam.xbio.top/CellMarker/download.jsp
+}
+
+```
+
+
+```{r, warning=FALSE, echo=FALSE, message=FALSE}
+run_main()
+
+```
+
+
+
+
+
+```{r}
+#Make a violin plot for strong markers
+VlnPlot(sc_data, features = c("CD79A", "CD8A", "CD14", "CCR7",
+                           "PPBP", "NKG7"))
+
+```
+
+
+```{r}
+#Demonstrate subtypes with featureplots
+
+FeaturePlot(sc_data, features = c("CD79A", "CD8A", "CD14", "CCR7",
+                               "PPBP", "NKG7"))
+
+```
+
+```{r}
+marker_list <- list(
+  'T-Cells (CD4)' = c("NOSIP", "CCR7", "IL7R", "CD27"),
+  'T-Cells (CD8)' = c("CD8A", "CD8B", "GZMK", "CD3E"),
+  'B-Cells' = c("CD79A", "CD79B"),
+  "NK Cells" = c("NKG7", "GZMB"),
+  "Platelets" = "PPBP"
+)
+
+```
+
+Which are the CD4 T cells?
+```{r}
+FeaturePlot(sc_data, features = marker_list$`T-Cells (CD4)`)
+```
+
+Which are the CD8 T cells?
+```{r}
+FeaturePlot(sc_data, features = marker_list$`T-Cells (CD8)`)
+```
+
+Which are the B-cells?
+```{r}
+FeaturePlot(sc_data, features = marker_list$`B-Cells`)
+```
+Which are the NK-cells?
+```{r}
+FeaturePlot(sc_data, features = marker_list$`NK Cells`)
+
+```
+
+Which are the platelets?
+```{r}
+FeaturePlot(sc_data, features = marker_list$Platelets)
+```
+
